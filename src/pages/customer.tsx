@@ -5,7 +5,6 @@ import {
   Bell,
   Check,
   ChevronLeft,
-  Clock,
   Minus,
   Plus,
   ReceiptText,
@@ -91,6 +90,7 @@ export function TableEntry() {
 
 export function CustomerOrder() {
   const qc = useQueryClient();
+  const [sessionClosed, setSessionClosed] = useState(false);
   const {
     lines,
     add,
@@ -104,11 +104,18 @@ export function CustomerOrder() {
   const [quantity, setQuantity] = useState(1);
   const [variant, setVariant] = useState<Option>();
   const [extras, setExtras] = useState<Option[]>([]);
+  const [search, setSearch] = useState("");
+  const [category, setCategory] = useState("all");
+  const [diet, setDiet] = useState("all");
+  const [sort, setSort] = useState("recommended");
   const session = useQuery<TableSession>({
     queryKey: ["guest-session"],
     queryFn: () => api.get("/guest/session"),
   });
-  const menu = useQuery<{ items: MenuItem[] }>({
+  const menu = useQuery<{
+    items: MenuItem[];
+    categories: { _id: string; name: string }[];
+  }>({
     queryKey: ["menu"],
     queryFn: () => api.get("/public/menu?limit=100"),
   });
@@ -135,10 +142,15 @@ export function CustomerOrder() {
     socket.on("connected", () =>
       qc.invalidateQueries({ queryKey: ["guest-orders"] }),
     );
+    socket.on("bill:settled", () => {
+      setSessionClosed(true);
+      clear();
+    });
+    socket.on("session:closed", () => setSessionClosed(true));
     return () => {
       socket.close();
     };
-  }, [qc]);
+  }, [clear, qc]);
   const submit = useMutation({
     mutationFn: () =>
       api.post(
@@ -199,7 +211,41 @@ export function CustomerOrder() {
       sum + order.items.reduce((count, item) => count + item.quantity, 0),
     0,
   );
+  const visibleItems = useMemo(() => {
+    const query = search.trim().toLocaleLowerCase();
+    return [...(menu.data?.items || [])]
+      .filter((item) => {
+        const searchable = [item.name, item.description, ...item.ingredients]
+          .filter(Boolean)
+          .join(" ")
+          .toLocaleLowerCase();
+        return (
+          (!query || searchable.includes(query)) &&
+          (category === "all" || item.category?._id === category) &&
+          (diet === "all" || item.dietaryLabels.includes(diet))
+        );
+      })
+      .sort((a, b) => {
+        if (sort === "price-low") return a.basePrice - b.basePrice;
+        if (sort === "price-high") return b.basePrice - a.basePrice;
+        return Number(b.featured) - Number(a.featured);
+      });
+  }, [category, diet, menu.data?.items, search, sort]);
   if (session.isLoading || menu.isLoading) return <Loading />;
+  if (sessionClosed)
+    return (
+      <main className="grid min-h-screen place-items-center bg-cream p-5">
+        <Card className="max-w-md p-8 text-center">
+          <span className="mx-auto grid size-16 place-items-center rounded-full bg-emerald-100 text-emerald-700">
+            <Check size={30} />
+          </span>
+          <h1 className="mt-5 font-serif text-4xl">Thank you</h1>
+          <p className="mt-3 text-ink/60">
+            Your table bill is settled and this ordering session is now closed.
+          </p>
+        </Card>
+      </main>
+    );
   if (session.error)
     return (
       <div className="grid min-h-screen place-items-center p-5">
@@ -247,9 +293,56 @@ export function CustomerOrder() {
             <h2 className="mt-2 font-serif text-4xl">
               What are you in the mood for?
             </h2>
+            <div className="mt-6 grid gap-3 sm:grid-cols-[1fr_auto_auto]">
+              <input
+                aria-label="Search menu"
+                className="min-h-12 rounded-xl border border-black/10 bg-paper px-4 outline-none focus:border-clay"
+                placeholder="Search dishes or ingredients"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+              />
+              <select
+                aria-label="Dietary filter"
+                className="min-h-12 rounded-xl border border-black/10 bg-paper px-4"
+                value={diet}
+                onChange={(event) => setDiet(event.target.value)}
+              >
+                <option value="all">All diets</option>
+                <option value="vegetarian">Vegetarian</option>
+                <option value="vegan">Vegan</option>
+                <option value="gluten-free">Gluten-free</option>
+              </select>
+              <select
+                aria-label="Sort menu"
+                className="min-h-12 rounded-xl border border-black/10 bg-paper px-4"
+                value={sort}
+                onChange={(event) => setSort(event.target.value)}
+              >
+                <option value="recommended">Recommended</option>
+                <option value="price-low">Price: low to high</option>
+                <option value="price-high">Price: high to low</option>
+              </select>
+            </div>
+            <div className="mt-3 flex gap-2 overflow-x-auto pb-2">
+              <button
+                className={`whitespace-nowrap rounded-full px-4 py-2 text-sm ${category === "all" ? "bg-ink text-white" : "bg-paper"}`}
+                onClick={() => setCategory("all")}
+              >
+                All dishes
+              </button>
+              {menu.data?.categories.map((itemCategory) => (
+                <button
+                  className={`whitespace-nowrap rounded-full px-4 py-2 text-sm ${category === itemCategory._id ? "bg-ink text-white" : "bg-paper"}`}
+                  key={itemCategory._id}
+                  onClick={() => setCategory(itemCategory._id)}
+                >
+                  {itemCategory.name}
+                </button>
+              ))}
+            </div>
           </section>
           <div className="grid gap-4">
-            {menu.data?.items.map((item) => (
+            {visibleItems.map((item) => (
               <Card
                 key={item._id}
                 className="flex overflow-hidden"
@@ -288,6 +381,12 @@ export function CustomerOrder() {
                 )}
               </Card>
             ))}
+            {!visibleItems.length && (
+              <Empty
+                title="No dishes found"
+                body="Try a different search or remove a filter."
+              />
+            )}
           </div>
           {orders.data && orders.data.length > 0 && (
             <section className="mt-10">
@@ -302,6 +401,17 @@ export function CustomerOrder() {
                           {o.items
                             .map((i) => `${i.quantity}× ${i.name}`)
                             .join(", ")}
+                        </p>
+                        <p className="mt-1 text-xs text-ink/40">
+                          Ordered at{" "}
+                          {new Date(o.createdAt).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                          {!["rejected", "cancelled", "completed"].includes(
+                            o.status,
+                          ) &&
+                            ` · About ${Math.max(...o.items.map((item) => item.prepMinutes || 15))} min estimate`}
                         </p>
                       </div>
                       <Badge
@@ -318,7 +428,10 @@ export function CustomerOrder() {
                         {o.status}
                       </Badge>
                     </div>
-                    <StatusTimeline status={o.status} />
+                    <StatusTimeline
+                      status={o.status}
+                      reason={o.statusHistory.at(-1)?.reason}
+                    />
                   </Card>
                 ))}
               </div>
@@ -724,22 +837,53 @@ function OptionGroup({
     </div>
   );
 }
-function StatusTimeline({ status }: { status: string }) {
-  const steps = ["pending", "accepted", "preparing", "ready", "served"];
-  const current = steps.indexOf(status);
+function StatusTimeline({
+  status,
+  reason,
+}: {
+  status: string;
+  reason?: string;
+}) {
+  const steps = [
+    { key: "pending", label: "Sent" },
+    { key: "accepted", label: "Accepted" },
+    { key: "preparing", label: "Preparing" },
+    { key: "ready", label: "Ready" },
+    { key: "served", label: "Served" },
+    { key: "completed", label: "Complete" },
+  ];
+  if (["rejected", "cancelled"].includes(status))
+    return (
+      <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">
+        This order was {status}
+        {reason
+          ? `: ${reason}`
+          : ". Please ask a team member if you need help."}
+      </p>
+    );
+  const current = steps.findIndex((step) => step.key === status);
   return (
-    <div className="mt-4 flex items-center">
-      {steps.map((s, i) => (
-        <div className="flex flex-1 items-center last:flex-none" key={s}>
-          <span
-            title={s}
-            className={`size-2.5 rounded-full ${i <= current ? "bg-clay" : "bg-black/10"}`}
-          />
-          {i < steps.length - 1 && (
+    <div
+      className="mt-4 grid grid-cols-6 gap-1"
+      aria-label={`Order status: ${status}`}
+    >
+      {steps.map((step, i) => (
+        <div className="min-w-0 text-center" key={step.key}>
+          <div className="flex items-center">
             <span
-              className={`h-px flex-1 ${i < current ? "bg-clay" : "bg-black/10"}`}
+              className={`size-2.5 shrink-0 rounded-full ${i <= current ? "bg-clay" : "bg-black/10"}`}
             />
-          )}
+            {i < steps.length - 1 && (
+              <span
+                className={`h-px flex-1 ${i < current ? "bg-clay" : "bg-black/10"}`}
+              />
+            )}
+          </div>
+          <span
+            className={`mt-1 block truncate text-[10px] ${i <= current ? "text-ink" : "text-ink/35"}`}
+          >
+            {step.label}
+          </span>
         </div>
       ))}
     </div>

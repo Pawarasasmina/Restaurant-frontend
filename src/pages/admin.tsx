@@ -498,7 +498,7 @@ export function Orders({ kitchen = false }: { kitchen?: boolean }) {
   const qc = useQueryClient();
   const orders = useQuery<Order[]>({
     queryKey: ["orders"],
-    queryFn: () => api.get(`/orders${kitchen ? "?status=accepted" : ""}`),
+    queryFn: () => api.get("/orders"),
   });
   const bills = useQuery<Bill[]>({
     queryKey: ["bills"],
@@ -525,6 +525,11 @@ export function Orders({ kitchen = false }: { kitchen?: boolean }) {
     };
   }, [qc]);
   if (orders.isLoading || (!kitchen && bills.isLoading)) return <Loading />;
+  const visibleOrders = kitchen
+    ? orders.data?.filter((order) =>
+        ["accepted", "preparing"].includes(order.status),
+      )
+    : orders.data;
   return (
     <div>
       <div className="flex justify-between">
@@ -539,10 +544,10 @@ export function Orders({ kitchen = false }: { kitchen?: boolean }) {
       <div className="mt-6">
         {kitchen ? (
           <div className="grid gap-4 lg:grid-cols-3">
-            <OrderList orders={orders.data} />
+            <OrderList orders={visibleOrders} />
           </div>
         ) : (
-          <TableGroupedOrders orders={orders.data} bills={bills.data} />
+          <TableGroupedOrders orders={visibleOrders} bills={bills.data} />
         )}
       </div>
     </div>

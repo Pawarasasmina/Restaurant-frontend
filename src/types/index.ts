@@ -45,6 +45,34 @@ export type Restaurant = {
   gallery: string[];
   openingHours: { day: number; open: string; close: string; closed: boolean }[];
   testimonials: { name: string; quote: string; visible: boolean }[];
+  logoUrl?: string;
+  websiteTheme?: {
+    heroEyebrow?: string;
+    heroTitle?: string;
+    heroOverlay?: number;
+    storyEyebrow?: string;
+    storyTitle?: string;
+    storyText?: string;
+    storyImageUrl?: string;
+    seasonalEnabled?: boolean;
+    seasonalEffect?:
+      | "none"
+      | "christmas"
+      | "new_year"
+      | "poya"
+      | "vesak"
+      | "avurudu"
+      | "valentine"
+      | "halloween";
+    stylePreset?:
+      "signature" | "modern" | "minimal" | "tropical" | "monochrome";
+    cardStyle?: "soft" | "outlined" | "glass";
+    buttonStyle?: "pill" | "rounded" | "square";
+    heroAlignment?: "left" | "center";
+    contentWidth?: "comfortable" | "wide";
+    announcement?: string;
+    announcementEnabled?: boolean;
+  };
 };
 export type Order = {
   _id: string;
@@ -54,6 +82,8 @@ export type Order = {
     name: string;
     quantity: number;
     lineTotal: number;
+    prepMinutes?: number;
+    notes?: string;
     variant?: { name: string };
     extras: { name: string }[];
   }[];
@@ -65,7 +95,7 @@ export type Order = {
   status: string;
   createdAt: string;
   table?: { number: string };
-  statusHistory: { status: string; at: string }[];
+  statusHistory: { status: string; at: string; reason?: string }[];
 };
 export type TableSession = {
   session: { id: string; status: string; expiresAt: string };
