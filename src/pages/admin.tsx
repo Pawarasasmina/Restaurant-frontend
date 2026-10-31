@@ -115,10 +115,19 @@ export function AdminLayout() {
   });
   if (me.isLoading) return <Loading />;
   if (me.error) return <Navigate to="/staff/login" replace />;
+  const currentPage =
+    nav.find(([, to]) => to === location.pathname)?.[0] || "Operations";
   return (
-    <div className="min-h-screen bg-[#f4f3ef]">
+    <div className="min-h-screen bg-[#f4f3ef] pb-20 md:pb-0">
+      {mobile && (
+        <button
+          className="fixed inset-0 z-40 bg-black/45 backdrop-blur-sm md:hidden"
+          aria-label="Close navigation"
+          onClick={() => setMobile(false)}
+        />
+      )}
       <aside
-        className={`fixed inset-y-0 left-0 z-50 w-64 bg-ink p-5 text-white transition md:translate-x-0 ${mobile ? "translate-x-0" : "-translate-x-full"}`}
+        className={`fixed inset-y-0 left-0 z-50 flex w-[min(19rem,88vw)] flex-col bg-ink p-5 text-white shadow-2xl transition-transform duration-200 md:w-64 md:translate-x-0 md:shadow-none ${mobile ? "translate-x-0" : "-translate-x-full"}`}
       >
         <div className="flex items-center justify-between">
           <Link to="/admin" className="font-serif text-xl">
@@ -128,7 +137,16 @@ export function AdminLayout() {
             <X />
           </button>
         </div>
-        <nav className="mt-9 grid gap-1">
+        <div className="mt-6 rounded-2xl bg-white/[.06] p-3">
+          <p className="truncate text-sm font-semibold">{me.data?.user.name}</p>
+          <div className="mt-1 flex items-center justify-between gap-2">
+            <p className="truncate text-xs text-white/45">
+              {me.data?.user.email}
+            </p>
+            <Badge>{me.data?.user.role}</Badge>
+          </div>
+        </div>
+        <nav className="mt-6 grid flex-1 gap-1 overflow-y-auto pr-1">
           {nav
             .filter(
               ([label]) =>
@@ -152,9 +170,7 @@ export function AdminLayout() {
               </NavLink>
             ))}
         </nav>
-        <div className="absolute inset-x-5 bottom-5 border-t border-white/10 pt-4">
-          <p className="text-sm font-semibold">{me.data?.user.name}</p>
-          <p className="text-xs text-white/45">{me.data?.user.role}</p>
+        <div className="mt-4 border-t border-white/10 pt-4">
           <button
             onClick={async () => {
               await api.post("/auth/logout");
@@ -167,25 +183,54 @@ export function AdminLayout() {
         </div>
       </aside>
       <div className="md:pl-64">
-        <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b bg-white px-5">
-          <button className="md:hidden" onClick={() => setMobile(true)}>
+        <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-black/[.06] bg-white/95 px-4 backdrop-blur md:h-20 md:px-8">
+          <button
+            aria-label="Open navigation"
+            className="rounded-xl bg-black/5 p-2 md:hidden"
+            onClick={() => setMobile(true)}
+          >
             <MenuIcon />
           </button>
-          <div>
+          <div className="min-w-0 flex-1 px-3 md:px-0">
             <p className="text-xs text-ink/40">Workspace</p>
-            <h1 className="font-semibold">
-              {nav.find(([, to]) => to === location.pathname)?.[0] ||
-                "Operations"}
+            <h1 className="truncate text-base font-semibold md:text-lg">
+              {currentPage}
             </h1>
           </div>
-          <button className="rounded-full bg-black/5 p-2">
+          <div className="hidden text-right sm:block">
+            <p className="text-sm font-semibold">{me.data?.user.name}</p>
+            <p className="text-xs capitalize text-ink/40">
+              {me.data?.user.role}
+            </p>
+          </div>
+          <button
+            aria-label="Notifications"
+            className="ml-3 rounded-full bg-black/5 p-2.5"
+          >
             <Bell size={19} />
           </button>
         </header>
-        <main className="p-5 md:p-8">
-          <Outlet context={{ user: me.data?.user }} />
+        <main className="px-4 py-5 sm:px-6 md:px-8 md:py-8">
+          <div className="mx-auto max-w-[1500px]">
+            <Outlet context={{ user: me.data?.user }} />
+          </div>
         </main>
       </div>
+      <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 border-t border-black/10 bg-white/95 px-2 pb-[max(.45rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur md:hidden">
+        {nav.slice(0, 4).map(([label, to, Icon]) => (
+          <NavLink
+            end={to === "/admin"}
+            key={to}
+            to={to}
+            className={({ isActive }) =>
+              `flex min-w-0 flex-col items-center gap-1 rounded-xl px-1 py-1.5 text-[10px] font-semibold ${isActive ? "bg-clay/10 text-clay" : "text-ink/45"}`
+            }
+          >
+            <Icon size={19} />
+            <span className="truncate">{label}</span>
+          </NavLink>
+        ))}
+      </nav>
     </div>
   );
 }

@@ -3,7 +3,7 @@ import { ArrowRight, Clock, MapPin, Search } from "lucide-react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 import { api, formatMoney } from "../services/api";
 import type { MenuItem, Restaurant, Category } from "../types";
@@ -23,7 +23,34 @@ const useMenu = () =>
 export function Home() {
   const { data: s } = useSettings();
   const { data: m } = useMenu();
-  const { register, handleSubmit, reset } = useForm();
+  const { register, handleSubmit, reset, control } = useForm<{
+    name: string;
+    phone: string;
+    email: string;
+    partySize: string;
+    date: string;
+    tableId: string;
+    notes: string;
+  }>();
+  const reservationDate = useWatch({ control, name: "date" });
+  const reservationPartySize = useWatch({ control, name: "partySize" });
+  const availableTables = useQuery<
+    {
+      id: string;
+      number: string;
+      displayName?: string;
+      capacity: number;
+      zone: string;
+    }[]
+  >({
+    queryKey: ["reservation-tables", reservationDate, reservationPartySize],
+    queryFn: () =>
+      api.get(
+        `/public/reservations/available-tables?date=${encodeURIComponent(new Date(reservationDate).toISOString())}&partySize=${reservationPartySize}`,
+      ),
+    enabled: Boolean(reservationDate) && Number(reservationPartySize) > 0,
+    retry: false,
+  });
   const reserve = useMutation({
     mutationFn: (v: unknown) =>
       api.post("/public/reservations", {
@@ -197,7 +224,41 @@ export function Home() {
                 type="datetime-local"
                 {...register("date", { required: true })}
               />
-              <Input placeholder="Notes or occasion" {...register("notes")} />
+              <select
+                aria-label="Choose an available table"
+                disabled={
+                  !reservationDate ||
+                  !reservationPartySize ||
+                  availableTables.isLoading
+                }
+                className="focus-ring w-full rounded-xl border border-black/10 bg-paper px-4 py-3 outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                {...register("tableId", { required: true })}
+              >
+                <option value="">
+                  {!reservationDate || !reservationPartySize
+                    ? "Choose date and party size first"
+                    : availableTables.isLoading
+                      ? "Checking available tables…"
+                      : "Select your table"}
+                </option>
+                {availableTables.data?.map((table) => (
+                  <option value={table.id} key={table.id}>
+                    {table.displayName || `Table ${table.number}`} ·{" "}
+                    {table.zone} · seats {table.capacity}
+                  </option>
+                ))}
+              </select>
+              {availableTables.data?.length === 0 && (
+                <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800 md:col-span-2">
+                  No table fits that time and party size. Please choose another
+                  time.
+                </p>
+              )}
+              <Input
+                className="md:col-span-2"
+                placeholder="Notes or occasion"
+                {...register("notes")}
+              />
               <Button disabled={reserve.isPending} className="md:col-span-2">
                 {reserve.isPending
                   ? "Checking availability…"
