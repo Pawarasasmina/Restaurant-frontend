@@ -58,13 +58,17 @@ export function Login() {
     password: string;
   }>();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const mutation = useMutation<
     { user: User },
     Error,
     { email: string; password: string }
   >({
     mutationFn: (v) => api.post("/auth/login", v),
-    onSuccess: () => navigate("/admin"),
+    onSuccess: (data) => {
+      queryClient.setQueryData(["me"], data);
+      navigate("/admin", { replace: true });
+    },
     onError: (e) => toast.error(e.message),
   });
   return (
