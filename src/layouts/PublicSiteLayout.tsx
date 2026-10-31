@@ -1,12 +1,13 @@
-import { useState, type CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link, Outlet } from "react-router-dom";
+import { Link, Outlet, useLocation } from "react-router-dom";
 import { Menu as MenuIcon, UtensilsCrossed } from "lucide-react";
 import { api } from "../services/api";
 import type { Restaurant } from "../types";
 
 export function PublicSiteLayout() {
   const [open, setOpen] = useState(false);
+  const location = useLocation();
   const { data: settings } = useQuery<Restaurant>({
     queryKey: ["settings"],
     queryFn: () => api.get("/public/settings"),
@@ -19,6 +20,33 @@ export function PublicSiteLayout() {
   const hasAnnouncement = Boolean(
     theme?.announcementEnabled && theme.announcement,
   );
+  const jumpTo = (id: string) => {
+    setOpen(false);
+    requestAnimationFrame(() =>
+      document
+        .getElementById(id)
+        ?.scrollIntoView({ behavior: "smooth", block: "start" }),
+    );
+  };
+  useEffect(() => {
+    if (!location.hash) return;
+    const id = decodeURIComponent(location.hash.slice(1));
+    const scrollToSection = () => {
+      const section = document.getElementById(id);
+      if (!section) return false;
+      section.scrollIntoView({
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+          ? "auto"
+          : "smooth",
+        block: "start",
+      });
+      return true;
+    };
+    const frame = requestAnimationFrame(() => {
+      if (!scrollToSection()) window.setTimeout(scrollToSection, 80);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [location.hash, location.pathname]);
   return (
     <div
       className={`public-site min-h-screen season-${effect} style-${theme?.stylePreset || "signature"} hero-${theme?.heroAlignment || "left"} content-${theme?.contentWidth || "comfortable"}`}
@@ -54,11 +82,16 @@ export function PublicSiteLayout() {
           </Link>
           <nav className="hidden items-center gap-7 text-sm font-medium md:flex">
             <Link to="/menu">Menu</Link>
-            <a href="/#story">Our story</a>
-            <a href="/#visit">Visit</a>
+            <Link to="/#story" onClick={() => jumpTo("story")}>
+              Our story
+            </Link>
+            <Link to="/#visit" onClick={() => jumpTo("visit")}>
+              Visit
+            </Link>
             <Link
               className="rounded-full bg-ink px-5 py-2.5 text-white"
               to="/#reserve"
+              onClick={() => jumpTo("reserve")}
             >
               Reserve a table
             </Link>
@@ -74,8 +107,12 @@ export function PublicSiteLayout() {
         {open && (
           <nav className="grid gap-4 border-t bg-paper px-5 py-5 md:hidden">
             <Link to="/menu">Menu</Link>
-            <a href="/#story">Our story</a>
-            <a href="/#reserve">Reservations</a>
+            <Link to="/#story" onClick={() => jumpTo("story")}>
+              Our story
+            </Link>
+            <Link to="/#reserve" onClick={() => jumpTo("reserve")}>
+              Reservations
+            </Link>
           </nav>
         )}
       </header>
