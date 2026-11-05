@@ -9,6 +9,7 @@ import {
 } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { io } from "socket.io-client";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   BarChart3,
   Bell,
@@ -20,6 +21,7 @@ import {
   LogOut,
   Menu as MenuIcon,
   QrCode,
+  ReceiptText,
   Settings,
   Tags,
   Table2,
@@ -39,6 +41,13 @@ type Bill = {
   paid: number;
   refunded: number;
   status: string;
+};
+type ServiceCall = {
+  _id: string;
+  type: "waiter" | "urgent" | "bill";
+  status: "open" | "acknowledged" | "resolved" | "dismissed";
+  createdAt: string;
+  table?: { number: string; displayName?: string };
 };
 const nav = [
   ["Dashboard", "/admin", LayoutDashboard],
@@ -106,13 +115,53 @@ export function Login() {
 }
 export function AdminLayout() {
   const [mobile, setMobile] = useState(false);
+  const [serviceAlert, setServiceAlert] = useState<ServiceCall | null>(null);
   const location = useLocation();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const me = useQuery<{ user: User }>({
     queryKey: ["me"],
     queryFn: () => api.get("/auth/me"),
     retry: false,
   });
+  const calls = useQuery<ServiceCall[]>({
+    queryKey: ["calls"],
+    queryFn: () => api.get("/waiter-calls"),
+    enabled: !!me.data,
+  });
+  useEffect(() => {
+    if (!me.data) return;
+    const socket = io(import.meta.env.VITE_SOCKET_URL || "http://localhost:4000", { withCredentials: true });
+    const soundAlert = () => {
+      try {
+        const AudioContextClass = window.AudioContext || (window as typeof window & { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+        const context = new AudioContextClass();
+        const oscillator = context.createOscillator();
+        const gain = context.createGain();
+        oscillator.frequency.setValueAtTime(880, context.currentTime);
+        oscillator.frequency.setValueAtTime(660, context.currentTime + .14);
+        gain.gain.setValueAtTime(.08, context.currentTime);
+        gain.gain.exponentialRampToValueAtTime(.001, context.currentTime + .35);
+        oscillator.connect(gain);
+        gain.connect(context.destination);
+        oscillator.start();
+        oscillator.stop(context.currentTime + .35);
+      } catch { /* A browser may require interaction before playing sound. */ }
+    };
+    socket.on("waiter-call:new", (call: ServiceCall) => {
+      setServiceAlert(call);
+      soundAlert();
+      queryClient.invalidateQueries({ queryKey: ["calls"] });
+    });
+    socket.on("waiter-call:changed", (call: ServiceCall) => {
+      queryClient.invalidateQueries({ queryKey: ["calls"] });
+      setServiceAlert((current) => current?._id === call._id && ["resolved", "dismissed"].includes(call.status) ? null : current);
+    });
+    socket.on("connected", () => queryClient.invalidateQueries({ queryKey: ["calls"] }));
+    return () => {
+      socket.close();
+    };
+  }, [me.data, queryClient]);
   if (me.isLoading) return <Loading />;
   if (me.error) return <Navigate to="/staff/login" replace />;
   const currentPage =
@@ -205,9 +254,14 @@ export function AdminLayout() {
           </div>
           <button
             aria-label="Notifications"
-            className="ml-3 rounded-full bg-black/5 p-2.5"
+            className="relative ml-3 rounded-full bg-black/5 p-2.5"
           >
             <Bell size={19} />
+            {!!calls.data?.length && (
+              <span className="absolute -right-1 -top-1 grid min-w-5 place-items-center rounded-full bg-red-600 px-1 text-[10px] font-bold leading-5 text-white">
+                {calls.data.length}
+              </span>
+            )}
           </button>
         </header>
         <main className="px-4 py-5 sm:px-6 md:px-8 md:py-8">
@@ -231,10 +285,84 @@ export function AdminLayout() {
           </NavLink>
         ))}
       </nav>
+      <AnimatePresence>
+        {serviceAlert && (
+          <ServiceAttentionAlert
+            call={serviceAlert}
+            onClose={() => setServiceAlert(null)}
+            onAcknowledge={async () => {
+              await api.patch(`/waiter-calls/${serviceAlert._id}`, { status: "acknowledged" });
+              queryClient.invalidateQueries({ queryKey: ["calls"] });
+              setServiceAlert(null);
+            }}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }
+function ServiceAttentionAlert({
+  call,
+  onClose,
+  onAcknowledge,
+}: {
+  call: ServiceCall;
+  onClose: () => void;
+  onAcknowledge: () => Promise<void>;
+}) {
+  const [working, setWorking] = useState(false);
+  const isBill = call.type === "bill";
+  return (
+    <motion.div
+      className="fixed inset-x-3 top-3 z-[80] mx-auto max-w-md sm:right-5 sm:left-auto sm:top-5 sm:w-[25rem]"
+      initial={{ y: -80, opacity: 0, scale: .92 }}
+      animate={{ y: 0, opacity: 1, scale: 1 }}
+      exit={{ y: -50, opacity: 0, scale: .95 }}
+      transition={{ type: "spring", damping: 22, stiffness: 340 }}
+      role="alertdialog"
+      aria-label="New customer service request"
+    >
+      <div className={`overflow-hidden rounded-2xl border-2 bg-white shadow-2xl ${isBill ? "border-amber-400" : "border-red-400"}`}>
+        <motion.div
+          className={`h-1.5 ${isBill ? "bg-amber-500" : "bg-red-500"}`}
+          animate={{ opacity: [1, .35, 1] }}
+          transition={{ repeat: Infinity, duration: 1.1 }}
+        />
+        <div className="p-4">
+          <div className="flex items-start gap-3">
+            <motion.span
+              className={`grid size-12 shrink-0 place-items-center rounded-full text-white ${isBill ? "bg-amber-500" : "bg-red-600"}`}
+              animate={{ rotate: [-8, 8, -8], scale: [1, 1.08, 1] }}
+              transition={{ repeat: Infinity, duration: .75 }}
+            >
+              {isBill ? <ReceiptText size={23} /> : <Bell size={23} />}
+            </motion.span>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-bold uppercase tracking-[.16em] text-ink/45">Customer needs attention</p>
+              <h2 className="mt-1 font-serif text-2xl">Table {call.table?.number || "—"}</h2>
+              <p className="mt-1 text-sm text-ink/65">{isBill ? "Requested the final bill" : call.type === "urgent" ? "Needs urgent assistance" : "Rang the service bell"}</p>
+            </div>
+            <button className="rounded-full bg-black/5 p-1.5" onClick={onClose} aria-label="Dismiss alert"><X size={17} /></button>
+          </div>
+          <div className="mt-4 flex items-center justify-between gap-3">
+            <p className="text-xs text-ink/40">{new Date(call.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</p>
+            <Button
+              disabled={working}
+              onClick={async () => {
+                setWorking(true);
+                try { await onAcknowledge(); } finally { setWorking(false); }
+              }}
+            >
+              {working ? "Acknowledging…" : "Acknowledge"}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
 export function Dashboard() {
+  const qc = useQueryClient();
   const orders = useQuery<Order[]>({
     queryKey: ["orders"],
     queryFn: () => api.get("/orders"),
@@ -247,9 +375,14 @@ export function Dashboard() {
     queryKey: ["reservations"],
     queryFn: () => api.get("/reservations"),
   });
-  const calls = useQuery<any[]>({
+  const calls = useQuery<ServiceCall[]>({
     queryKey: ["calls"],
     queryFn: () => api.get("/waiter-calls"),
+  });
+  const updateCall = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: "acknowledged" | "resolved" }) => api.patch(`/waiter-calls/${id}`, { status }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["calls"] }),
+    onError: (error: Error) => toast.error(error.message),
   });
   const active =
     orders.data?.filter(
@@ -303,9 +436,12 @@ export function Dashboard() {
           <h2 className="font-serif text-2xl">Service requests</h2>
           <div className="mt-4 grid gap-3">
             {calls.data?.map((c) => (
-              <div
+              <motion.div
                 key={c._id}
-                className={`rounded-xl p-4 ${c.type === "urgent" ? "bg-red-50" : "bg-black/[.03]"}`}
+                layout
+                initial={{ opacity: 0, x: 18 }}
+                animate={{ opacity: 1, x: 0 }}
+                className={`rounded-xl border p-4 ${c.type === "urgent" ? "border-red-200 bg-red-50" : c.type === "bill" ? "border-amber-200 bg-amber-50" : "border-black/[.06] bg-black/[.03]"}`}
               >
                 <div className="flex justify-between">
                   <b>Table {c.table?.number}</b>
@@ -316,7 +452,26 @@ export function Dashboard() {
                 <p className="mt-1 text-xs text-ink/50">
                   {new Date(c.createdAt).toLocaleTimeString()}
                 </p>
-              </div>
+                <div className="mt-3 flex gap-2">
+                  {c.status === "open" && (
+                    <button
+                      className="rounded-full bg-ink px-3 py-1.5 text-xs font-semibold text-white"
+                      disabled={updateCall.isPending}
+                      onClick={() => updateCall.mutate({ id: c._id, status: "acknowledged" })}
+                    >
+                      Acknowledge
+                    </button>
+                  )}
+                  <button
+                    className="rounded-full border border-black/10 bg-white px-3 py-1.5 text-xs font-semibold"
+                    disabled={updateCall.isPending}
+                    onClick={() => updateCall.mutate({ id: c._id, status: "resolved" })}
+                  >
+                    Resolve
+                  </button>
+                  <span className="ml-auto self-center text-xs capitalize text-ink/40">{c.status}</span>
+                </div>
+              </motion.div>
             ))}
             {!calls.data?.length && (
               <p className="py-8 text-center text-sm text-ink/40">
