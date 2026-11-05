@@ -4,14 +4,18 @@ import { useNavigate, useParams } from "react-router-dom";
 import {
   Bell,
   Check,
+  ChefHat,
   ChevronLeft,
+  Clock3,
   Minus,
   Plus,
   ReceiptText,
   ShoppingBag,
   Trash2,
   UtensilsCrossed,
+  X,
 } from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
 import { toast } from "sonner";
 import { io } from "socket.io-client";
 import { api, formatMoney } from "../services/api";
@@ -115,6 +119,7 @@ export function CustomerOrder() {
   const [category, setCategory] = useState("all");
   const [diet, setDiet] = useState("all");
   const [sort, setSort] = useState("recommended");
+  const [orderDetails, setOrderDetails] = useState<Order | "bill" | null>(null);
   const session = useQuery<TableSession>({
     queryKey: ["guest-session"],
     queryFn: () => api.get("/guest/session"),
@@ -407,7 +412,19 @@ export function CustomerOrder() {
               <h2 className="font-serif text-3xl">Your orders</h2>
               <div className="mt-4 grid gap-3">
                 {orders.data.map((o) => (
-                  <Card key={o._id} className="p-4">
+                  <Card
+                    key={o._id}
+                    className="cursor-pointer p-4 transition hover:-translate-y-0.5 hover:shadow-lg"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setOrderDetails(o)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setOrderDetails(o);
+                      }
+                    }}
+                  >
                     <div className="flex justify-between">
                       <div>
                         <p className="font-semibold">{o.orderNumber}</p>
@@ -793,13 +810,16 @@ export function CustomerOrder() {
       {lines.length === 0 && activeOrders.length > 0 && (
         <div className="fixed inset-x-0 bottom-0 z-30 border-t bg-paper p-4 lg:hidden">
           <div className="mx-auto flex max-w-3xl items-center gap-4">
-            <div className="flex-1">
+            <button
+              className="flex-1 rounded-xl p-1 text-left transition active:scale-[.98]"
+              onClick={() => setOrderDetails("bill")}
+            >
               <p className="font-semibold">Running table bill</p>
               <p className="text-sm text-ink/50">
                 {formatMoney(orderedTotal, settings.data?.currency)} ·{" "}
-                {sessionItemCount} items
+                {sessionItemCount} items · Tap for status
               </p>
-            </div>
+            </button>
             <Button
               className="!bg-ink"
               disabled={call.isPending}
@@ -811,9 +831,133 @@ export function CustomerOrder() {
           </div>
         </div>
       )}
+      <AnimatePresence>
+        {orderDetails && (
+          <OrderDetailsSheet
+            view={orderDetails}
+            orders={activeOrders}
+            currency={settings.data?.currency}
+            total={orderedTotal}
+            itemCount={sessionItemCount}
+            onClose={() => setOrderDetails(null)}
+            onSelectOrder={(order) => setOrderDetails(order)}
+          />
+        )}
+      </AnimatePresence>
     </main>
   );
 }
+
+function OrderDetailsSheet({
+  view,
+  orders,
+  currency,
+  total,
+  itemCount,
+  onClose,
+  onSelectOrder,
+}: {
+  view: Order | "bill";
+  orders: Order[];
+  currency?: string;
+  total: number;
+  itemCount: number;
+  onClose: () => void;
+  onSelectOrder: (order: Order) => void;
+}) {
+  const order = view === "bill" ? null : view;
+  return (
+    <motion.div
+      className="fixed inset-0 z-[70] flex items-end bg-black/50 backdrop-blur-[2px]"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      onClick={onClose}
+    >
+      <motion.section
+        className="max-h-[88vh] w-full overflow-hidden rounded-t-[2rem] bg-paper shadow-2xl"
+        initial={{ y: "100%" }}
+        animate={{ y: 0 }}
+        exit={{ y: "100%" }}
+        transition={{ type: "spring", damping: 28, stiffness: 320 }}
+        onClick={(event) => event.stopPropagation()}
+        aria-modal="true"
+        role="dialog"
+      >
+        <div className="mx-auto mt-3 h-1.5 w-12 rounded-full bg-black/15" />
+        <div className="mx-auto max-h-[84vh] max-w-2xl overflow-y-auto px-5 pb-8 pt-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[.18em] text-clay">
+                {order ? "Live order status" : "Live table bill"}
+              </p>
+              <h2 className="mt-1 font-serif text-3xl">
+                {order ? order.orderNumber : "Your running bill"}
+              </h2>
+            </div>
+            <button className="rounded-full bg-black/5 p-2" onClick={onClose} aria-label="Close details">
+              <X size={20} />
+            </button>
+          </div>
+          {order ? (
+            <>
+              <motion.div className="mt-5 rounded-2xl bg-gradient-to-br from-[#f7eadf] to-[#fff8f0] p-5" initial={{ scale: .96, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}>
+                <div className="flex items-center gap-3">
+                  <motion.span
+                    className="grid size-12 place-items-center rounded-full bg-clay text-white shadow-lg"
+                    animate={!["served", "completed", "rejected", "cancelled"].includes(order.status) ? { scale: [1, 1.08, 1] } : {}}
+                    transition={{ repeat: Infinity, duration: 1.8 }}
+                  >
+                    {order.status === "preparing" ? <ChefHat /> : ["ready", "served", "completed"].includes(order.status) ? <Check /> : <Clock3 />}
+                  </motion.span>
+                  <div><p className="text-sm text-ink/50">Current status</p><p className="text-xl font-bold capitalize">{order.status}</p></div>
+                </div>
+                <StatusTimeline status={order.status} reason={order.statusHistory.at(-1)?.reason} large />
+              </motion.div>
+              <div className="mt-6 divide-y divide-black/[.07]">
+                {order.items.map((item, index) => (
+                  <div className="flex justify-between gap-4 py-4" key={`${order._id}-detail-${index}`}>
+                    <div>
+                      <p className="font-semibold"><span className="text-clay">{item.quantity}×</span> {item.name}</p>
+                      {item.variant && <p className="text-xs text-ink/45">{item.variant.name}</p>}
+                      {!!item.extras?.length && <p className="text-xs text-ink/45">+ {item.extras.map((extra) => extra.name).join(", ")}</p>}
+                    </div>
+                    <span className="whitespace-nowrap font-semibold">{formatMoney(item.lineTotal, currency)}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-3 flex justify-between rounded-2xl bg-ink px-5 py-4 text-white">
+                <span>Order total</span><strong>{formatMoney(order.total, currency)}</strong>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="mt-5 rounded-2xl bg-ink p-5 text-white">
+                <div className="flex items-end justify-between">
+                  <div><p className="text-xs text-white/55">Current table total</p><p className="mt-1 font-serif text-3xl">{formatMoney(total, currency)}</p></div>
+                  <p className="text-sm text-white/60">{itemCount} items</p>
+                </div>
+              </div>
+              <p className="mt-6 text-xs font-bold uppercase tracking-[.18em] text-ink/40">Tap an order to see its journey</p>
+              <div className="mt-3 grid gap-3">
+                {orders.map((item, index) => (
+                  <motion.button key={item._id} className="rounded-2xl border border-black/[.07] p-4 text-left shadow-sm" initial={{ y: 12, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: index * .06 }} onClick={() => onSelectOrder(item)}>
+                    <div className="flex items-center justify-between gap-3">
+                      <div><p className="font-bold">{item.orderNumber}</p><p className="mt-1 text-xs text-ink/45">{item.items.reduce((sum, line) => sum + line.quantity, 0)} items · {formatMoney(item.total, currency)}</p></div>
+                      <Badge tone={["ready", "served", "completed"].includes(item.status) ? "good" : "warn"}>{item.status}</Badge>
+                    </div>
+                    <StatusTimeline status={item.status} reason={item.statusHistory.at(-1)?.reason} />
+                  </motion.button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      </motion.section>
+    </motion.div>
+  );
+}
+
 function OptionGroup({
   title,
   options,
@@ -854,9 +998,11 @@ function OptionGroup({
 function StatusTimeline({
   status,
   reason,
+  large = false,
 }: {
   status: string;
   reason?: string;
+  large?: boolean;
 }) {
   const steps = [
     { key: "pending", label: "Sent" },
@@ -878,14 +1024,17 @@ function StatusTimeline({
   const current = steps.findIndex((step) => step.key === status);
   return (
     <div
-      className="mt-4 grid grid-cols-6 gap-1"
+      className={`mt-4 grid grid-cols-6 gap-1 ${large ? "pt-2" : ""}`}
       aria-label={`Order status: ${status}`}
     >
       {steps.map((step, i) => (
         <div className="min-w-0 text-center" key={step.key}>
           <div className="flex items-center">
-            <span
-              className={`size-2.5 shrink-0 rounded-full ${i <= current ? "bg-clay" : "bg-black/10"}`}
+            <motion.span
+              className={`${large ? "size-3.5" : "size-2.5"} shrink-0 rounded-full ${i <= current ? "bg-clay" : "bg-black/10"}`}
+              initial={large ? { scale: 0 } : false}
+              animate={{ scale: 1 }}
+              transition={{ delay: i * .08 }}
             />
             {i < steps.length - 1 && (
               <span
