@@ -36,7 +36,12 @@ export function TableEntry() {
   const { qrToken } = useParams();
   const nav = useNavigate();
   const [confirmed, setConfirmed] = useState(false);
-  const join = useMutation<TableSession>({
+  const join = useMutation<{
+    table: { id: string; number: string; displayName?: string };
+    session: { id: string; status: string; expiresAt: string };
+    sessionToken?: string;
+    joined: boolean;
+  }>({
     mutationFn: () =>
       api.post("/table-sessions", {
         qrToken,
@@ -44,6 +49,8 @@ export function TableEntry() {
         guestCount: 1,
       }),
     onSuccess: (d) => {
+      if (d.sessionToken)
+        sessionStorage.setItem("tableSessionToken", d.sessionToken);
       if (d.session.status === "active") nav("/table/order", { replace: true });
     },
     onError: (e) => toast.error(e.message),
@@ -134,7 +141,10 @@ export function CustomerOrder() {
   useEffect(() => {
     const socket = io(
       import.meta.env.VITE_SOCKET_URL || "http://localhost:4000",
-      { withCredentials: true },
+      {
+        withCredentials: true,
+        auth: { tableSession: sessionStorage.getItem("tableSessionToken") },
+      },
     );
     socket.on("order:changed", () =>
       qc.invalidateQueries({ queryKey: ["guest-orders"] }),
@@ -144,9 +154,13 @@ export function CustomerOrder() {
     );
     socket.on("bill:settled", () => {
       setSessionClosed(true);
+      sessionStorage.removeItem("tableSessionToken");
       clear();
     });
-    socket.on("session:closed", () => setSessionClosed(true));
+    socket.on("session:closed", () => {
+      sessionStorage.removeItem("tableSessionToken");
+      setSessionClosed(true);
+    });
     return () => {
       socket.close();
     };
